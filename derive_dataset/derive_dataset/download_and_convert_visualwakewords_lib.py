@@ -59,11 +59,11 @@ def download_coco_dataset(dataset_dir):
     dataset_dir: Path where coco dataset should be downloaded.
   """
   #dataset_utils.download_and_uncompress_zipfile(FLAGS.coco_train_url,
-                                                #dataset_dir)
-  dataset_utils.download_and_uncompress_zipfile(FLAGS.coco_validation_url,
-                                                dataset_dir)
-  dataset_utils.download_and_uncompress_zipfile(FLAGS.coco_annotations_url,
-                                                dataset_dir)
+  #                                              dataset_dir)
+  #dataset_utils.download_and_uncompress_zipfile(FLAGS.coco_validation_url,
+  #                                              dataset_dir)
+  #dataset_utils.download_and_uncompress_zipfile(FLAGS.coco_annotations_url,
+  #                                              dataset_dir)
 
 
 def create_labels_file(foreground_class_of_interest,

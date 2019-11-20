@@ -5,6 +5,8 @@ VisualStudioVersion = 15.0.28307.757
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "derive_dataset", "derive_dataset\derive_dataset.pyproj", "{CB7F3C0A-745A-4EF0-99CC-D655882AF227}"
 EndProject
+Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "model_train", "..\model_train\model_train\model_train.pyproj", "{D14FC6E1-242F-4901-9CAC-BC7483C67B6B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -13,6 +15,8 @@ Global
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{CB7F3C0A-745A-4EF0-99CC-D655882AF227}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{CB7F3C0A-745A-4EF0-99CC-D655882AF227}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D14FC6E1-242F-4901-9CAC-BC7483C67B6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D14FC6E1-242F-4901-9CAC-BC7483C67B6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

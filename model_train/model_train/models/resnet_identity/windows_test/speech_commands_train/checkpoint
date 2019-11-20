@@ -1,0 +1,6 @@
+model_checkpoint_path: "resnet_identity.ckpt-6000"
+all_model_checkpoint_paths: "resnet_identity.ckpt-4000"
+all_model_checkpoint_paths: "resnet_identity.ckpt-4500"
+all_model_checkpoint_paths: "resnet_identity.ckpt-5000"
+all_model_checkpoint_paths: "resnet_identity.ckpt-5500"
+all_model_checkpoint_paths: "resnet_identity.ckpt-6000"
