@@ -21,6 +21,9 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="compute_FLOPs.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="input_data.py">
       <SubType>Code</SubType>
     </Compile>

@@ -70,13 +70,19 @@ def main(_):
   val_generator = data_processor.val_data_generator()
 
   # step and learning rate
-  training_steps_list = list(map(int, FLAGS.how_many_training_steps.split(',')))
-  learning_rates_list = list(map(float, FLAGS.learning_rate.split(',')))
-  if len(training_steps_list) != len(learning_rates_list):
-    raise Exception(
-        '--how_many_training_steps and --learning_rate must be equal length '
-        'lists, but are %d and %d long instead' % (len(training_steps_list),
-                                                   len(learning_rates_list)))
+  training_steps_list = [FLAGS.step_per_epoch]*FLAGS.epoch
+  learning_rates_list = [FLAGS.start_learning_rate*(FLAGS.learning_rate_decay**i) for i in range(0, FLAGS.epoch)]
+  print(learning_rates_list)
+
+  #training_steps_list = list(map(int, FLAGS.how_many_training_steps.split(',')))
+  #learning_rates_list = list(map(float, FLAGS.learning_rate.split(',')))
+  #if len(training_steps_list) != len(learning_rates_list):
+  #  raise Exception(
+  #      '--how_many_training_steps and --learning_rate must be equal length '
+  #      'lists, but are %d and %d long instead' % (len(training_steps_list),
+  #                                                 len(learning_rates_list)))
+  # 
+
   # tf gragh
   # input
   # ph = placeholder
@@ -89,11 +95,12 @@ def main(_):
 
 
   # separate training stage and val stage for is_training
+  selected_model = FLAGS.model_architecture
   logits, softmax_prob, dropout_prob_ph = models.create_model(
       input_batch_ph,
       model_setting,
-      g_model_selected)
-
+      selected_model)
+  
   # Define loss and optimizer
   input_ground_truth_ph = tf.compat.v1.placeholder(
        #tf.int64, [FLAGS.batch_size,], name='groundtruth_input') #google version on github 08.2019
@@ -198,6 +205,7 @@ def main(_):
     #print('-'*50)
     #print(training_step % FLAGS.eval_step_interval, is_last_step)
     #print('-'*50)
+
     if (training_step % FLAGS.eval_step_interval) == 0 or is_last_step:
       print('start validation...')
       total_accuracy = 0.
@@ -246,7 +254,8 @@ def main(_):
       saver.save(sess, checkpoint_path, global_step=training_step)
 
 
-
+  t1=time.time()
+  t_train=(t1-t0)/60.0
   #write my logfile
   mylogfile=g_model_path+'model_training_log.txt'
   mylogfile_ID=open(mylogfile, 'wt')
@@ -279,6 +288,7 @@ if __name__ == '__main__':
 
 
   g_model_selected='resnet_identity'
+  #g_model_selected='mobile_net_v2'
 
   
 
@@ -318,23 +328,46 @@ if __name__ == '__main__':
       max-degree of clockwise/counter-clockwise rotation.
       """)
 
-  parser.add_argument(
-      '--how_many_training_steps',
-      type=str,
-      #default='500,5000,5000',
-      default='5000,5000,5000',
-      help='How many training loops to run',)
 
   parser.add_argument(
-      '--learning_rate',
-      type=str,
-      default='0.01,0.001,0.0001', #default for tc_resnet
-      #default='0.01,0.005,0.001', #testing new value
-      help='How large a learning rate to use when training.')
+      '--epoch',
+      type=int,
+      default=100,
+      help='How many training epochs to run',)
+  parser.add_argument(
+      '--step_per_epoch',
+      type=int,
+      default=500,
+      help='How many training step per epoch',)
+  parser.add_argument(
+      '--start_learning_rate',
+      type=float,
+      default=0.02,
+      help='learning_rate will decay by epoch',)
+  parser.add_argument(
+      '--learning_rate_decay',
+      type=float,
+      default=0.94,
+      help='learning_rate decay',)
+
+
+  #parser.add_argument(
+  #    '--how_many_training_steps',
+  #    type=str,
+  #    #default='500,5000,5000',
+  #    default='1500,1500,1500,1500,1500,1500,1500,1500,1500',
+  #    help='How many training loops to run',)
+
+  #parser.add_argument(
+  #    '--learning_rate',
+  #    type=str,
+  #    default='0.02,0.015,0.01,0.005,0.001,0.0005,0.0001,0.00005,0.00001', #default for tc_resnet
+  #    #default='0.01,0.005,0.001', #testing new value
+  #    help='How large a learning rate to use when training.')
   parser.add_argument(
       '--batch_size',
       type=int,
-      default=16,
+      default=64,
       help='How many items to train with at once',)
 
   parser.add_argument(
@@ -368,26 +401,30 @@ if __name__ == '__main__':
   parser.add_argument(
       '--image_resolution',
       type=str,
-      default='100 100',
+      default='128 128',
       help='240p(240 320), 360p(360 480) or other size.')
 
   parser.add_argument(
       '--training_layer_init_mode',
       type=str,
-      default='selu',
+      default='tensorflow',
       help='tensorflow, keras, selu')
   parser.add_argument(
       '--activation_mode',
       type=str,
-      default='selu',
+      default='relu',
       help='relu, selu, chip_relu')
 
   parser.add_argument(
       '--dropout_prob',
       type=float,
-      default=0.1,
+      default=0.05,
       help='0~1')
-
+  parser.add_argument(
+      '--model_architecture',
+      type=str,
+      default=g_model_selected,
+      help='What model architecture to use')
   FLAGS, unparsed = parser.parse_known_args()
 
   tf.compat.v1.app.run(main=main, argv=[sys.argv[0]] + unparsed)

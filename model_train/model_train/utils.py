@@ -16,12 +16,80 @@ from tensorflow.python.ops import random_ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.layers import utils
 import random
-#testing possible chip activation function
+
+# -------------------------------- activation utils --------------------------------
+
 def chip_acti_fun(x):
     x = tf.nn.relu(x)
     x = 1-tf.exp(-2*x)
     return x
 
+def activation(x, mode):
+    if mode=='relu':
+        out = tf.nn.relu(x)
+    elif mode=='selu':
+        out = tf.nn.selu(x)
+    elif mode=='chip_relu':
+        out = chip_acti_fun(x)
+    return out
+
+# -------------------------------- dropout utils --------------------------------
+
+def dropout_selu(x, rate, alpha= -1.7580993408473766, fixedPointMean=0.0, fixedPointVar=1.0, 
+                 noise_shape=None, seed=None, name=None, training=False):
+    """Dropout to a value with rescaling.
+        1. Self-Normalizing Neural Networks
+        https://arxiv.org/pdf/1706.02515.pdf
+        https://github.com/bioinf-jku/SNNs/blob/master/SelfNormalizingNetworks_MLP_MNIST.ipynb
+    """
+
+    def dropout_selu_impl(x, rate, alpha, noise_shape, seed, name):
+        #keep_prob = rate # original code
+        keep_prob = 1.0 - rate # rate means dropout_prob, keep_prob should be 1-rate.
+        x = ops.convert_to_tensor(x, name="x")
+        if isinstance(keep_prob, numbers.Real) and not 0 < keep_prob <= 1:
+            raise ValueError("keep_prob must be a scalar tensor or a float in the "
+                                             "range (0, 1], got %g" % keep_prob)
+        keep_prob = ops.convert_to_tensor(keep_prob, dtype=x.dtype, name="keep_prob")
+        keep_prob.get_shape().assert_is_compatible_with(tensor_shape.scalar())
+
+        alpha = ops.convert_to_tensor(alpha, dtype=x.dtype, name="alpha")
+        keep_prob.get_shape().assert_is_compatible_with(tensor_shape.scalar())
+
+        if tensor_util.constant_value(keep_prob) == 1:
+            return x
+
+        noise_shape = noise_shape if noise_shape is not None else array_ops.shape(x)
+        random_tensor = keep_prob
+        random_tensor += random_ops.random_uniform(noise_shape, seed=seed, dtype=x.dtype)
+        binary_tensor = math_ops.floor(random_tensor)
+        ret = x * binary_tensor + alpha * (1-binary_tensor)
+
+        a = tf.sqrt(fixedPointVar / (keep_prob *((1-keep_prob) * tf.pow(alpha-fixedPointMean,2) + fixedPointVar)))
+
+        b = fixedPointMean - a * (keep_prob * fixedPointMean + (1 - keep_prob) * alpha)
+        ret = a * ret + b
+        ret.set_shape(x.get_shape())
+        return ret
+
+    with ops.name_scope(name, "dropout", [x]) as name:
+        return utils.smart_cond(training,
+            lambda: dropout_selu_impl(x, rate, alpha, noise_shape, seed, name),
+            lambda: array_ops.identity(x))
+
+def dropout_with_mode(x, dropout_prob, mode):
+
+    if mode=='relu':
+        y=tf.nn.dropout(x, rate=dropout_prob)
+    elif mode=='selu':
+        y=dropout_selu(x, dropout_prob, training=True)
+    elif mode=='chip_relu':
+        #to be modified
+        y=tf.nn.dropout(x, rate=dropout_prob)
+
+    return y
+
+# -------------------------------- primary conv. and fc layers --------------------------------
 
 def conv_layer(x, kernel_size, stride, padding='SAME', mode='keras', name='c'):
     if mode == 'tensorflow':
@@ -56,6 +124,26 @@ def conv_layer(x, kernel_size, stride, padding='SAME', mode='keras', name='c'):
         c_out = tf.nn.conv2d(x, w, stride, padding) + b
     return c_out
 
+def pointwise_conv_layer(x, input_channel, output_channel, name = 'pwise_c'):
+    return conv_layer(x, [1,1,input_channel, output_channel], [1,1,1,1], 
+                      padding='SAME', mode='tensorflow', name=name)
+
+def depthwise_conv_layer(x, kernel_size, stride, padding='SAME', name = 'dwise_c'):
+    '''
+    kernel_size = [x, y, input_channel, 1]
+    the 4th dim. must be 1
+    '''
+    w_depthwise = tf.Variable(
+             tf.random.truncated_normal(
+              [kernel_size[0], kernel_size[1], kernel_size[2], 1],
+              stddev = np.sqrt(2/(kernel_size[0]*kernel_size[1]*kernel_size[2]))))
+    b_depthwise = tf.Variable(
+             tf.random.truncated_normal(
+                [kernel_size[2]], 
+                stddev=0.001))
+    out_depthwise = tf.nn.depthwise_conv2d(x, w_depthwise, stride, padding='SAME') + b_depthwise
+    return out_depthwise
+
 def fc_layer(x, last_layer_element_count, unit_num, mode = 'keras', name='fc'):
     if mode =='tensorflow':
         w = tf.Variable(
@@ -84,6 +172,11 @@ def fc_layer(x, last_layer_element_count, unit_num, mode = 'keras', name='fc'):
         fc_out = tf.matmul(x, w) + b
     return fc_out
 
+
+
+
+# -------------------------------- ResNet blocks --------------------------------
+
 def identity_block_v1(x, kernel_size, stride, 
                    padding='SAME', init_mode='selu', activation_mode='selu', name='b'):
     '''
@@ -108,7 +201,6 @@ def identity_block_v1(x, kernel_size, stride,
     #x = x * 256
     out = tf.add(inp, x) * 1
     return out
-
 
 def group_conv_block(x, group, kernel_size, stride, dropout_prob, is_training, 
                    padding='SAME', mode='selu', name='b'):
@@ -137,7 +229,6 @@ def group_conv_block(x, group, kernel_size, stride, dropout_prob, is_training,
     out = tf.add(inp, x) * 0.5
 
     return out
-
 
 def identity_block_v2(x, kernel_size, stride, dropout_prob, is_training, 
                    padding='SAME', mode='selu', name='b'):
@@ -195,113 +286,47 @@ def conv_block(x, kernel_size, stride, dropout_prob, is_training,
     #out = tf.nn.selu(out)
     return out
 
+# -------------------------------- Depthwise Separable conv. --------------------------------
 
-def depthwise_seperable_conv(x, kernel_size, stride):
-    
-    bn = 0
-
-    w_depthwise = tf.Variable(
-             tf.random.truncated_normal(
-              [kernel_size[0], kernel_size[1], kernel_size[2], 1],
-              stddev = np.sqrt( 2/(kernel_size[0]*kernel_size[1]*kernel_size[2]) )))
-    b_depthwise = tf.Variable(
-             tf.random.truncated_normal(
-                [kernel_size[2]], 
-                stddev=0.001))
-    w_pointwise = tf.Variable(
-             tf.random.truncated_normal(
-              [1,1,kernel_size[2],kernel_size[3]],
-              stddev = np.sqrt( 2/(kernel_size[0]*kernel_size[1]*kernel_size[2]) )))
-    b_pointwise = tf.Variable(
-             tf.random.truncated_normal(
-                [kernel_size[3]], 
-                stddev=0.001))
-
-    out_depthwise = tf.nn.depthwise_conv2d(x, w_depthwise, stride, padding='SAME') + b_depthwise
-    if bn:
-        out_depthwise = tf.keras.layers.BatchNormalization()(out_depthwise)
-    out_depthwise = tf.nn.relu(out_depthwise)
-
-    out_pointwise = tf.nn.conv2d(out_depthwise, w_pointwise, [1,1,1,1], padding='SAME') + b_pointwise
-    if bn:
-        out_pointwise = tf.keras.layers.BatchNormalization()(out_pointwise)
-    #out_pointwise = tf.nn.relu(out_pointwise)
-    return out_pointwise
-
-def ds_identity_block(x, kernel_size, stride, padding='SAME', mode='selu'):
+def mobilenetv2_block_1(x, kernel_size, expension_factor=2, name='mobile_block1'):
+    '''
+    reference: https://arxiv.org/pdf/1801.04381.pdf
+    block_1: Stride=1 block
+    '''
     inp = x
-    x = depthwise_seperable_conv(x, kernel_size, stride)
-    x = depthwise_seperable_conv(x, kernel_size, stride)
+    x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = activation(x, 'relu')
+    x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
+                             [1,1,1,1], name=name + '_dwise')
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = activation(x, 'relu')
+    
+    x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
     out = tf.add(inp, x)
     return out
 
-def activation(x, mode):
-    if mode=='relu':
-        out = tf.nn.relu(x)
-    elif mode=='selu':
-        out = tf.nn.selu(x)
-    elif mode=='chip_relu':
-        out = chip_acti_fun(x)
+def mobilenetv2_block_2(x, kernel_size, expension_factor=2, name='mobile_block1'):
+    '''
+    reference: https://arxiv.org/pdf/1801.04381.pdf
+    block_2: Stride=2 block
+    '''
 
+    x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = activation(x, 'relu')
+    x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
+                             [1,2,2,1], padding='VALID', name=name + '_dwise')
+    x = tf.keras.layers.BatchNormalization()(x)
+
+    x = activation(x, 'relu')
+    x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
+    
+    out = x
     return out
 
 
-def dropout_selu(x, rate, alpha= -1.7580993408473766, fixedPointMean=0.0, fixedPointVar=1.0, 
-                 noise_shape=None, seed=None, name=None, training=False):
-    """Dropout to a value with rescaling.
-        1. Self-Normalizing Neural Networks
-        https://arxiv.org/pdf/1706.02515.pdf
-        https://github.com/bioinf-jku/SNNs/blob/master/SelfNormalizingNetworks_MLP_MNIST.ipynb
-    """
-
-    def dropout_selu_impl(x, rate, alpha, noise_shape, seed, name):
-        #keep_prob = rate # original code
-        keep_prob = 1.0 - rate # rate means dropout_prob, keep_prob should be 1-rate.
-        x = ops.convert_to_tensor(x, name="x")
-        if isinstance(keep_prob, numbers.Real) and not 0 < keep_prob <= 1:
-            raise ValueError("keep_prob must be a scalar tensor or a float in the "
-                                             "range (0, 1], got %g" % keep_prob)
-        keep_prob = ops.convert_to_tensor(keep_prob, dtype=x.dtype, name="keep_prob")
-        keep_prob.get_shape().assert_is_compatible_with(tensor_shape.scalar())
-
-        alpha = ops.convert_to_tensor(alpha, dtype=x.dtype, name="alpha")
-        keep_prob.get_shape().assert_is_compatible_with(tensor_shape.scalar())
-
-        if tensor_util.constant_value(keep_prob) == 1:
-            return x
-
-        noise_shape = noise_shape if noise_shape is not None else array_ops.shape(x)
-        random_tensor = keep_prob
-        random_tensor += random_ops.random_uniform(noise_shape, seed=seed, dtype=x.dtype)
-        binary_tensor = math_ops.floor(random_tensor)
-        ret = x * binary_tensor + alpha * (1-binary_tensor)
-
-        a = tf.sqrt(fixedPointVar / (keep_prob *((1-keep_prob) * tf.pow(alpha-fixedPointMean,2) + fixedPointVar)))
-
-        b = fixedPointMean - a * (keep_prob * fixedPointMean + (1 - keep_prob) * alpha)
-        ret = a * ret + b
-        ret.set_shape(x.get_shape())
-        return ret
-
-    with ops.name_scope(name, "dropout", [x]) as name:
-        return utils.smart_cond(training,
-            lambda: dropout_selu_impl(x, rate, alpha, noise_shape, seed, name),
-            lambda: array_ops.identity(x))
-
-
-
-
-def dropout_with_mode(x, dropout_prob, mode):
-
-    if mode=='relu':
-        y=tf.nn.dropout(x, rate=dropout_prob)
-    elif mode=='selu':
-        y=dropout_selu(x, dropout_prob, training=True)
-    elif mode=='chip_relu':
-        #to be modified
-        y=tf.nn.dropout(x, rate=dropout_prob)
-
-    return y
+# -------------------------------- audio utils --------------------------------
 
 def get_mask_par(x_size, rate):
     # build a masking 0-1 matrix
@@ -386,5 +411,65 @@ def data_augment(x, x_size, mask_matrix, warp_source, warp_dest):
     x_mask = mask(x_warp, mask_matrix)
     
     return x_mask
+
+# -------------------------------- image utils --------------------------------
+# -------------------------------- other utils --------------------------------
+
+def count_conv_params_flops(conv_layer, verbose=1):
+    # out shape is  n_cells_dim1 * (n_cells_dim2 * n_cells_dim3)
+    out_shape = conv_layer.output.shape.as_list()
+    n_cells_total = np.prod(out_shape[1:-1])
+
+    n_conv_params_total = conv_layer.count_params()
+
+    conv_flops = 2 * n_conv_params_total * n_cells_total
+
+    if verbose:
+        print("layer %s params: %s" % (conv_layer.name, "{:,}".format(n_conv_params_total)))
+        print("layer %s flops: %s" % (conv_layer.name, "{:,}".format(conv_flops)))
+
+    return n_conv_params_total, conv_flops
+
+def count_dense_params_flops(dense_layer, verbose=1):
+    # out shape is  n_cells_dim1 * (n_cells_dim2 * n_cells_dim3)
+    out_shape = dense_layer.output.shape.as_list()
+    n_cells_total = np.prod(out_shape[1:-1])
+
+    n_dense_params_total = dense_layer.count_params()
+
+    dense_flops = 2 * n_dense_params_total
+
+    if verbose:
+        print("layer %s params: %s" % (dense_layer.name, "{:,}".format(n_dense_params_total)))
+        print("layer %s flops: %s" % (dense_layer.name, "{:,}".format(dense_flops)))
+
+    return n_dense_params_total, dense_flops
+
+def count_model_params_flops(model):
+    total_params = 0
+    total_flops = 0
+
+    model_layers = model.layers
+
+    for layer in model_layers:
+
+        if any(conv_type in str(type(layer)) for conv_type in ['Conv1D', 'Conv2D', 'Conv3D']):
+            params, flops = count_conv_params_flops(layer)
+            total_params += params
+            total_flops += flops
+        elif 'Dense' in str(type(layer)):
+            params, flops = count_dense_params_flops(layer)
+            total_params += params
+            total_flops += flops
+        else:
+            print("----------skippring layer: %s" % str(layer))
+    
+    total_mul = total_flops//2
+    print('-------------------------------------------------------')
+    print("total Param. (%s) : %s" % (model.name, "{:,}".format(total_params)))
+    print("total Mul.  (%s) : %s" % (model.name, "{:,}".format(total_mul)))
+    print("total FLOPs  (%s) : %s" % (model.name, "{:,}".format(total_flops)))
+
+    return total_params, total_flops
 
 

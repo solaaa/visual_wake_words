@@ -18,14 +18,7 @@ class DataProcessor(object):
         self.val_labels = sio.loadmat(os.path.join(self.label_path, 'val_labels.mat'))
         image_resolution_str = image_resolution.split(' ')
         self.image_resolution = [int(i) for i in image_resolution_str]
-        #if image_resolution == 240:
-        #    self.image_resolution = [240, 320]
-        #elif image_resolution == 360:
-        #    self.image_resolution = [360, 480]
-        #else:
-        #    # error
-        #    pass
-    #def pre_process_gragh()
+
 
     def image_process(self, img_path):
         # load image
