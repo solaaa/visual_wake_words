@@ -184,22 +184,19 @@ def identity_block_v1(x, kernel_size, stride,
     （Deep Residual Learning for Image Recognition.2015）
     https://arxiv.org/pdf/1512.03385.pdf
     '''
-    inp = x # channel=32
+    inp = x 
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[2],kernel_size[2]], 
                    stride, padding='SAME', mode=init_mode, name=name+'_c1')
-    x = tf.keras.layers.BatchNormalization()(x)
-    #x = x * 0.00390625
+    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
     x = activation(x, activation_mode)
-    #x = x * 256
 
 
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[2],kernel_size[3]], 
                    stride, padding='SAME', mode=init_mode, name = name+'_c2')
-    x = tf.keras.layers.BatchNormalization()(x)
-    #x = x * 0.00390625
-    x = activation(x, activation_mode)
-    #x = x * 256
-    out = tf.add(inp, x) * 1
+    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
+
+    x = tf.add(inp, x)
+    out = activation(x, activation_mode)
     return out
 
 def group_conv_block(x, group, kernel_size, stride, dropout_prob, is_training, 
@@ -242,64 +239,65 @@ def identity_block_v2(x, kernel_size, stride, dropout_prob, is_training,
     x = conv_layer(x, [1,1,kernel_size[2],expend_channel], 
                    stride, padding='SAME', mode=mode, name=name+'_c1')
     #x = tf.keras.layers.BatchNormalization()(x)
-    x = x * 0.00390625
+
     x = activation(x, mode)
-    x = x * 256
+
 
 
     x = conv_layer(x, [kernel_size[0],kernel_size[1],expend_channel,expend_channel], 
                    stride, padding='SAME', mode=mode, name = name+'_c2')
     #x = tf.keras.layers.BatchNormalization()(x)
-    x = x * 0.00390625
+
     x = activation(x, mode)
-    x = x * 256
+
 
     x = conv_layer(x, [1,1,expend_channel,kernel_size[3]], 
                    stride, padding='SAME', mode=mode, name = name+'_c2')
     #x = tf.keras.layers.BatchNormalization()(x)
-    x = x * 0.00390625
+
     x = activation(x, mode)
-    x = x * 256
+
     
-    out = tf.add(inp, x) * 0.5
+    out = tf.add(inp, x)
 
     return out
 
-def conv_block(x, kernel_size, stride, dropout_prob, is_training, 
-                   padding='SAME', mode='selu'):
-    inp = x 
+def conv_block(x, kernel_size, stride, init_mode='selu', activation_mode='selu'):
+    inp = x
+    # main path
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[2],kernel_size[3]], 
-                   stride, padding='SAME', mode=mode)
-    x = activation(x, mode)
+                   stride, padding='SAME', mode=init_mode)
+    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
+    x = activation(x, activation_mode)
 
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[3],kernel_size[3]], 
-                   stride, padding='SAME', mode=mode)
-    x = activation(x, mode)
-
+                   [1,1,1,1], padding='SAME', mode=init_mode)
+    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
+    
 
     # direct shortcut
     d = conv_layer(inp, [1,1,kernel_size[2],kernel_size[3]], 
-                   stride, padding='SAME', mode=mode)
-    d = activation(d, mode)
+                   [1,2,2,1], padding='SAME', mode=init_mode)
+    
 
     out = tf.add(d, x)
-    #out = tf.nn.selu(out)
+    out = activation(out, activation_mode)
     return out
 
 # -------------------------------- Depthwise Separable conv. --------------------------------
 
-def mobilenetv2_block_1(x, kernel_size, expension_factor=2, name='mobile_block1'):
+def mobilenetv2_block_1(x, kernel_size, expension_factor=6, name='mobile_block1'):
     '''
     reference: https://arxiv.org/pdf/1801.04381.pdf
     block_1: Stride=1 block
     '''
     inp = x
     x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
-    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
     x = activation(x, 'relu')
     x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
                              [1,1,1,1], name=name + '_dwise')
-    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
     x = activation(x, 'relu')
     
     x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
@@ -313,11 +311,11 @@ def mobilenetv2_block_2(x, kernel_size, expension_factor=2, name='mobile_block1'
     '''
 
     x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
-    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
     x = activation(x, 'relu')
     x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
                              [1,2,2,1], padding='VALID', name=name + '_dwise')
-    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
 
     x = activation(x, 'relu')
     x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
