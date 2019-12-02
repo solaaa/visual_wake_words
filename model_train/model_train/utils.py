@@ -31,6 +31,10 @@ def activation(x, mode):
         out = tf.nn.selu(x)
     elif mode=='chip_relu':
         out = chip_acti_fun(x)
+    elif mode == 'leaky_relu':
+        out = tf.nn.leaky_relu(x, 0.1)
+    elif mode == 'relu6':
+        out = tf.nn.relu6(x)
     return out
 
 # -------------------------------- dropout utils --------------------------------
@@ -79,12 +83,12 @@ def dropout_selu(x, rate, alpha= -1.7580993408473766, fixedPointMean=0.0, fixedP
 
 def dropout_with_mode(x, dropout_prob, mode):
 
-    if mode=='relu':
+    if mode=='relu' or 'leaky_relu':
         y=tf.nn.dropout(x, rate=dropout_prob)
     elif mode=='selu':
         y=dropout_selu(x, dropout_prob, training=True)
     elif mode=='chip_relu':
-        #to be modified
+        # to be modified
         y=tf.nn.dropout(x, rate=dropout_prob)
 
     return y
@@ -136,11 +140,11 @@ def depthwise_conv_layer(x, kernel_size, stride, padding='SAME', name = 'dwise_c
     w_depthwise = tf.Variable(
              tf.random.truncated_normal(
               [kernel_size[0], kernel_size[1], kernel_size[2], 1],
-              stddev = np.sqrt(2/(kernel_size[0]*kernel_size[1]*kernel_size[2]))))
+              stddev = np.sqrt(2/(kernel_size[0]*kernel_size[1]))),name=name+'_w')
     b_depthwise = tf.Variable(
              tf.random.truncated_normal(
                 [kernel_size[2]], 
-                stddev=0.001))
+                stddev=0.001),name=name+'_b')
     out_depthwise = tf.nn.depthwise_conv2d(x, w_depthwise, stride, padding='SAME') + b_depthwise
     return out_depthwise
 
@@ -148,7 +152,8 @@ def fc_layer(x, last_layer_element_count, unit_num, mode = 'keras', name='fc'):
     if mode =='tensorflow':
         w = tf.Variable(
                 tf.random.truncated_normal(
-                [last_layer_element_count, unit_num], stddev=0.01),
+                [last_layer_element_count, unit_num], 
+                stddev=np.sqrt(2/last_layer_element_count)),
                 name = name+'_w')
         b = tf.Variable(
                 tf.random.truncated_normal([unit_num], stddev=0.01),
@@ -276,7 +281,7 @@ def conv_block(x, kernel_size, stride, init_mode='selu', activation_mode='selu')
     
 
     # direct shortcut
-    d = conv_layer(inp, [1,1,kernel_size[2],kernel_size[3]], 
+    d = conv_layer(inp, kernel_size, 
                    [1,2,2,1], padding='SAME', mode=init_mode)
     
 
@@ -288,36 +293,34 @@ def conv_block(x, kernel_size, stride, init_mode='selu', activation_mode='selu')
 
 def mobilenetv2_block_1(x, kernel_size, expension_factor=6, name='mobile_block1'):
     '''
-    reference: https://arxiv.org/pdf/1801.04381.pdf
     block_1: Stride=1 block
     '''
     inp = x
     x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
-    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
-    x = activation(x, 'relu')
+    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
+    x = activation(x, 'relu6')
     x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
                              [1,1,1,1], name=name + '_dwise')
-    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
-    x = activation(x, 'relu')
+    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
+    x = activation(x, 'relu6')
     
     x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
     out = tf.add(inp, x)
     return out
 
-def mobilenetv2_block_2(x, kernel_size, expension_factor=2, name='mobile_block1'):
+def mobilenetv2_block_2(x, kernel_size, expension_factor=2, name='mobile_block2'):
     '''
-    reference: https://arxiv.org/pdf/1801.04381.pdf
     block_2: Stride=2 block
     '''
 
     x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
-    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
-    x = activation(x, 'relu')
+    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
+    x = activation(x, 'relu6')
     x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
-                             [1,2,2,1], padding='VALID', name=name + '_dwise')
-    x = tf.layers.BatchNormalization(momentum=0.8,scale=False)(x)
+                             [1,2,2,1], padding='SAME', name=name + '_dwise')
+    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
 
-    x = activation(x, 'relu')
+    x = activation(x, 'relu6')
     x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
     
     out = x
@@ -469,5 +472,38 @@ def count_model_params_flops(model):
     print("total FLOPs  (%s) : %s" % (model.name, "{:,}".format(total_flops)))
 
     return total_params, total_flops
+
+def count_mobilenet_v2_param(stage = [3,3,3,3], input_channel = [16,32,64,128], expension = 6, kernel_size = [3, 3], is_rgb=True):
+    if is_rgb:
+        input_channel.insert(0, 3)
+    else:
+        input_channel.insert(0, 1)
+    stage_len = len(stage)
+    total_count = 0
+    # input conv
+    total_count = total_count + kernel_size[0]*kernel_size[1]*input_channel[0]*input_channel[1]
+    # block
+    for s in range(len(stage)):
+        for i in range(stage[s]):
+            # point-wise
+            total_count = total_count + 1*1*input_channel[s+1]*input_channel[s+1]*expension
+            # dwise
+            total_count = total_count + kernel_size[0]*kernel_size[1]*input_channel[s+1]*expension
+            # point-wise
+            total_count = total_count + 1*1*input_channel[s+1]*expension*input_channel[s+1]
+        if s < len(stage)-1:
+
+            # stride=2
+            # point-wise
+            total_count = total_count + 1*1*input_channel[s+1]*input_channel[s+1]*expension
+            # dwise
+            total_count = total_count + kernel_size[0]*kernel_size[1]*input_channel[s+1]*expension
+            # point-wise
+            total_count = total_count + 1*1*input_channel[s+1]*expension*input_channel[s+2]
+    
+    # fc 
+    total_count = total_count + input_channel[-1]*2
+
+    return total_count
 
 

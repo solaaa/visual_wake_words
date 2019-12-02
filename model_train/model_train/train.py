@@ -42,7 +42,8 @@ def main(_):
       'activation_mode': FLAGS.activation_mode,
       'image_resolution': FLAGS.image_resolution,
       'dropout_prob': FLAGS.dropout_prob,
-      'batch_size': FLAGS.batch_size
+      'batch_size': FLAGS.batch_size,
+      'color_mode': FLAGS.color_mode
       }
 
 
@@ -65,7 +66,7 @@ def main(_):
 
 
   # get data generator
-  data_processor = input_data.DataProcessor(FLAGS.data_dir, FLAGS.batch_size, FLAGS.image_resolution)
+  data_processor = input_data.DataProcessor(FLAGS.data_dir, FLAGS.batch_size, FLAGS.image_resolution, FLAGS.color_mode)
   training_generator = data_processor.train_data_generator()
   val_generator = data_processor.val_data_generator()
 
@@ -90,8 +91,12 @@ def main(_):
   image_resolution = [int(i) for i in image_resolution_str]
   image_height, image_width = image_resolution[0], image_resolution[1]
 
+  if FLAGS.color_mode == 'gray':
+      image_channel = 1
+  else:
+      image_channel = 3
   input_batch_ph = tf.compat.v1.placeholder(
-      tf.float32, [None, image_height, image_width, 1], name='input_batch')
+      tf.float32, [None, image_height, image_width, image_channel], name='input_batch')
 
 
   # separate training stage and val stage for is_training
@@ -126,9 +131,9 @@ def main(_):
   predicted_indices = tf.argmax(logits, 1)
   correct_prediction = tf.equal(predicted_indices, input_ground_truth_ph)
 
-  confusion_matrix = tf.math.confusion_matrix(labels=input_ground_truth_ph, 
-                                              predictions=predicted_indices,
-                                              num_classes=2)
+  #confusion_matrix = tf.math.confusion_matrix(labels=input_ground_truth_ph, 
+  #                                            predictions=predicted_indices,
+  #                                            num_classes=2)
 # -----------------------------------------------------------------------------------------------------
   evaluation_step = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
   tf.compat.v1.summary.scalar('accuracy', evaluation_step)
@@ -177,10 +182,10 @@ def main(_):
     data_batch, data_labels = next(training_generator)
 
     # Run the graph with this batch of training data.
-    train_summary, train_accuracy, cross_entropy_value, _, _ = sess.run(
+    train_summary, train_accuracy, cross_entropy_value, _, _, logit_out = sess.run(
         [
             merged_summaries, evaluation_step, cross_entropy_mean, train_step,
-            increment_global_step
+            increment_global_step, logits
         ],
         feed_dict={ 
             input_batch_ph: data_batch,
@@ -188,6 +193,14 @@ def main(_):
             input_learning_rate_ph: learning_rate_value,
             dropout_prob_ph: FLAGS.dropout_prob
         })
+    #####################
+    if training_step < 1000:
+        print('---------------------------logit----------------------')
+        print(logit_out[:5])
+    #print('---------------------------ground_truth----------------------')
+    #print(data_labels)
+    #####################
+
     train_writer.add_summary(train_summary, training_step)
     tf.compat.v1.logging.info('Step #%d: rate %f, accuracy %.1f%%, cross entropy %f' %
                     (training_step, learning_rate_value, train_accuracy * 100,
@@ -210,7 +223,12 @@ def main(_):
       print('start validation...')
       total_accuracy = 0.
       total_loss = 0.
-      total_conf_matrix = None
+
+      #####################
+      # test on small set
+      val_data_size = 64*20
+      #####################
+
       val_total_step = val_data_size//FLAGS.batch_size
 
       for i in range(0, val_total_step):
@@ -218,8 +236,8 @@ def main(_):
         val_data_batch, va_data_labels = next(val_generator)
         # Run a validation step and capture training summaries for TensorBoard
         # with the `merged` op.
-        validation_summary, validation_accuracy, conf_matrix, validation_cross_entropy_value = sess.run(
-            [merged_summaries, evaluation_step, confusion_matrix, cross_entropy_mean],
+        validation_summary, validation_accuracy, validation_cross_entropy_value = sess.run(
+            [merged_summaries, evaluation_step, cross_entropy_mean],
             feed_dict={
                 input_batch_ph: val_data_batch,
                 input_ground_truth_ph: va_data_labels,
@@ -230,10 +248,7 @@ def main(_):
 
         total_accuracy += validation_accuracy
         total_loss += validation_cross_entropy_value
-        if total_conf_matrix is None:
-          total_conf_matrix = conf_matrix
-        else:
-          total_conf_matrix += conf_matrix
+
       total_accuracy = total_accuracy/val_total_step
       total_loss = total_loss/val_total_step
 
@@ -241,7 +256,7 @@ def main(_):
 
       val_loss_list.append(total_loss)
 
-      tf.compat.v1.logging.info('Confusion Matrix:\n %s' % (total_conf_matrix))
+
       tf.compat.v1.logging.info('Step %d: Validation accuracy = %.1f%% (N=%d)' %
                       (training_step, total_accuracy * 100, val_data_size))
 
@@ -252,7 +267,10 @@ def main(_):
                                      g_model_selected + '.ckpt')
       tf.compat.v1.logging.info('Saving to "%s-%d"', checkpoint_path, training_step)
       saver.save(sess, checkpoint_path, global_step=training_step)
-
+    if FLAG_linux==0:
+      my_log = {'loss': loss_list, 'val_loss': val_loss_list, 
+            'acc': acc_list, 'val_acc': val_acc_list}
+      sio.savemat('.\\models\\'+g_model_selected+'\\'+date_str+'\\'+'my_log.mat', my_log)
 
   t1=time.time()
   t_train=(t1-t0)/60.0
@@ -263,7 +281,6 @@ def main(_):
   mylogfile_ID.write('Training started in:'+date_str+'\n')
   mylogfile_ID.write('Training time is: %.2f minutes\n' % t_train)
 
-  #mylogfile_ID.write('Confusion Matrix:\n %s \n' % (total_conf_matrix))
 
   mylogfile_ID.close()
   print('My log file generated.')
@@ -271,7 +288,6 @@ def main(_):
   if FLAG_linux==0:
       my_log = {'loss': loss_list, 'val_loss': val_loss_list, 
             'acc': acc_list, 'val_acc': val_acc_list}
-      
       sio.savemat('.\\models\\'+g_model_selected+'\\'+date_str+'\\'+'my_log.mat', my_log)
 
 if __name__ == '__main__':
@@ -287,8 +303,9 @@ if __name__ == '__main__':
   date_str="d%s_t%02d%02d" %(str(timenow.date()), timenow.hour, timenow.minute)
 
 
-  g_model_selected='resnet_identity'
-  #g_model_selected='mobile_net_v2'
+  #g_model_selected='resnet'
+  g_model_selected='mobile_net_v2'
+  #g_model_selected='simple_convnet'
 
   
 
@@ -319,57 +336,6 @@ if __name__ == '__main__':
       help="""\
       Where to download the speech training data to.
       """)
-
-  parser.add_argument(
-      '--rotation',
-      type=float,
-      default=30,
-      help="""\
-      max-degree of clockwise/counter-clockwise rotation.
-      """)
-
-
-  parser.add_argument(
-      '--epoch',
-      type=int,
-      default=100,
-      help='How many training epochs to run',)
-  parser.add_argument(
-      '--step_per_epoch',
-      type=int,
-      default=500,
-      help='How many training step per epoch',)
-  parser.add_argument(
-      '--start_learning_rate',
-      type=float,
-      default=0.02,
-      help='learning_rate will decay by epoch',)
-  parser.add_argument(
-      '--learning_rate_decay',
-      type=float,
-      default=0.94,
-      help='learning_rate decay',)
-
-
-  #parser.add_argument(
-  #    '--how_many_training_steps',
-  #    type=str,
-  #    #default='500,5000,5000',
-  #    default='1500,1500,1500,1500,1500,1500,1500,1500,1500',
-  #    help='How many training loops to run',)
-
-  #parser.add_argument(
-  #    '--learning_rate',
-  #    type=str,
-  #    default='0.02,0.015,0.01,0.005,0.001,0.0005,0.0001,0.00005,0.00001', #default for tc_resnet
-  #    #default='0.01,0.005,0.001', #testing new value
-  #    help='How large a learning rate to use when training.')
-  parser.add_argument(
-      '--batch_size',
-      type=int,
-      default=64,
-      help='How many items to train with at once',)
-
   parser.add_argument(
       '--summaries_dir',
       type=str,
@@ -381,22 +347,41 @@ if __name__ == '__main__':
   parser.add_argument(
       '--train_dir',
       type=str,
-      #default='/tmp/speech_commands_train',
-      #default='./models/conv_test/speech_commands_train', # for pc test
       default=g_model_path+'speech_commands_train',
       help='Directory to write event l  ogs and checkpoint.')
+
   parser.add_argument(
       '--save_step_interval',
       type=int,
       default=500,
-      #default=2,
       help='Save model checkpoint every save_steps.')
+
   parser.add_argument(
       '--eval_step_interval',
       type=int,
-      default=10000,
-      #default=49,
+      default = 300,
       help='How often to evaluate the training results.')
+
+  #####################
+  # data augmentation #
+  #####################
+  parser.add_argument(
+      '--rotation',
+      type=float,
+      default=30,
+      help="""\
+      max-degree of clockwise/counter-clockwise rotation.
+      """)
+  
+  parser.add_argument(
+      '--color_mode',
+      type=str,
+      default='rgb',
+      help='rgb, gray')
+
+  ####################
+  # training settint #
+  ####################
 
   parser.add_argument(
       '--image_resolution',
@@ -409,22 +394,74 @@ if __name__ == '__main__':
       type=str,
       default='tensorflow',
       help='tensorflow, keras, selu')
+
   parser.add_argument(
       '--activation_mode',
       type=str,
-      default='relu',
-      help='relu, selu, chip_relu')
+      default='leaky_relu',
+      help='relu, selu, chip_relu, leaky_relu, relu6')
 
   parser.add_argument(
       '--dropout_prob',
       type=float,
-      default=0.05,
+      default=0.5,
       help='0~1')
+
   parser.add_argument(
       '--model_architecture',
       type=str,
       default=g_model_selected,
       help='What model architecture to use')
+
+  parser.add_argument(
+      '--batch_size',
+      type=int,
+      default=64,
+      help='How many items to train with at once',)
+
+  parser.add_argument(
+      '--epoch',
+      type=int,
+      default=35,
+      help='How many training epochs to run',)
+
+  parser.add_argument(
+      '--step_per_epoch',
+      type=int,
+      default=300,
+      #default=600,
+      help='How many training step per epoch',)
+
+  #########################
+  # learning rate setting #
+  #########################
+  parser.add_argument(
+      '--start_learning_rate',
+      type=float,
+      default=0.005,
+      help='learning_rate will decay by epoch',)
+  parser.add_argument(
+      '--learning_rate_decay',
+      type=float,
+      default=0.98,
+      help='learning_rate decay',)
+  #####################
+  # optimizor setting #
+  #####################
+  parser.add_argument(
+      '--optimizor',
+      type=str,
+      default='adam',
+      help='adam, RMSprop',)
+  parser.add_argument(
+      '--momentum',
+      type=float,
+      default='adam',
+      help='adam, RMSprop',)
+
+
+
+
   FLAGS, unparsed = parser.parse_known_args()
 
   tf.compat.v1.app.run(main=main, argv=[sys.argv[0]] + unparsed)

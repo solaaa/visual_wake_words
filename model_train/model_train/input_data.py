@@ -45,7 +45,7 @@ class DataProcessor(object):
         file_list = os.listdir(self.train_path)
         #################
         # test small set
-        MAX_NUM = 64*100
+        MAX_NUM = 64*300
         file_list = file_list[:MAX_NUM]
         #################
         file_pt = 0
@@ -72,8 +72,8 @@ class DataProcessor(object):
         file_pt = 0
         #################
         # test small set
-        MAX_NUM = 64*30
-        file_list = file_list[:MAX_NUM]
+        #MAX_NUM = 64*20
+        #file_list = file_list[:MAX_NUM]
         #################
         label_keys = list(self.val_labels.keys())[3:] # index >=3 is valid
         while True:
