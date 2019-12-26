@@ -182,7 +182,7 @@ def fc_layer(x, last_layer_element_count, unit_num, mode = 'keras', name='fc'):
 
 # -------------------------------- ResNet blocks --------------------------------
 
-def identity_block_v1(x, kernel_size, stride, 
+def identity_block_v1(x, kernel_size, stride, is_training,
                    padding='SAME', init_mode='selu', activation_mode='selu', name='b'):
     '''
     refer to ResNet yet BN is not adopted
@@ -192,13 +192,13 @@ def identity_block_v1(x, kernel_size, stride,
     inp = x 
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[2],kernel_size[2]], 
                    stride, padding='SAME', mode=init_mode, name=name+'_c1')
-    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
+    x = tf.layers.BatchNormalization(momentum=0.99,scale=True,trainable=is_training)(x)
     x = activation(x, activation_mode)
 
 
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[2],kernel_size[3]], 
                    stride, padding='SAME', mode=init_mode, name = name+'_c2')
-    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
+    x = tf.layers.BatchNormalization(momentum=0.99,scale=True,trainable=is_training)(x)
 
     x = tf.add(inp, x)
     out = activation(x, activation_mode)
@@ -243,7 +243,7 @@ def identity_block_v2(x, kernel_size, stride, dropout_prob, is_training,
     inp = x # channel=32
     x = conv_layer(x, [1,1,kernel_size[2],expend_channel], 
                    stride, padding='SAME', mode=mode, name=name+'_c1')
-    #x = tf.keras.layers.BatchNormalization()(x)
+    #x = tf.layers.BatchNormalization(momentum=0.9,scale=True,trainable=is_training)(x)
 
     x = activation(x, mode)
 
@@ -267,17 +267,17 @@ def identity_block_v2(x, kernel_size, stride, dropout_prob, is_training,
 
     return out
 
-def conv_block(x, kernel_size, stride, init_mode='selu', activation_mode='selu'):
+def conv_block(x, kernel_size, stride, is_training, init_mode='selu', activation_mode='selu'):
     inp = x
     # main path
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[2],kernel_size[3]], 
                    stride, padding='SAME', mode=init_mode)
-    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
+    x = tf.layers.BatchNormalization(momentum=0.99,scale=True,trainable=is_training)(x)
     x = activation(x, activation_mode)
 
     x = conv_layer(x, [kernel_size[0],kernel_size[1],kernel_size[3],kernel_size[3]], 
                    [1,1,1,1], padding='SAME', mode=init_mode)
-    #x = tf.layers.BatchNormalization(momentum=0.9,scale=False)(x)
+    x = tf.layers.BatchNormalization(momentum=0.99,scale=True,trainable=is_training)(x)
     
 
     # direct shortcut
@@ -291,34 +291,34 @@ def conv_block(x, kernel_size, stride, init_mode='selu', activation_mode='selu')
 
 # -------------------------------- Depthwise Separable conv. --------------------------------
 
-def mobilenetv2_block_1(x, kernel_size, expension_factor=6, name='mobile_block1'):
+def mobilenetv2_block_1(x, kernel_size, is_training, expension_factor=6, name='mobile_block1'):
     '''
     block_1: Stride=1 block
     '''
     inp = x
     x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
-    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
+    x = tf.layers.BatchNormalization(momentum=0.9,scale=True,trainable=is_training)(x)
     x = activation(x, 'relu6')
     x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
                              [1,1,1,1], name=name + '_dwise')
-    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
+    x = tf.layers.BatchNormalization(momentum=0.9,scale=True,trainable=is_training)(x)
     x = activation(x, 'relu6')
     
     x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
     out = tf.add(inp, x)
     return out
 
-def mobilenetv2_block_2(x, kernel_size, expension_factor=2, name='mobile_block2'):
+def mobilenetv2_block_2(x, kernel_size, is_training, expension_factor=2, name='mobile_block2'):
     '''
     block_2: Stride=2 block
     '''
 
     x = pointwise_conv_layer(x, kernel_size[2], kernel_size[2]*expension_factor, name=name+'_pwise1')
-    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
+    x = tf.layers.BatchNormalization(momentum=0.99,scale=True,trainable=is_training)(x)
     x = activation(x, 'relu6')
     x = depthwise_conv_layer(x, [kernel_size[0], kernel_size[1], kernel_size[2]*expension_factor, 1],
                              [1,2,2,1], padding='SAME', name=name + '_dwise')
-    x = tf.layers.BatchNormalization(momentum=0.9,scale=True)(x)
+    x = tf.layers.BatchNormalization(momentum=0.99,scale=True,trainable=is_training)(x)
 
     x = activation(x, 'relu6')
     x = pointwise_conv_layer(x, kernel_size[2]*expension_factor, kernel_size[3], name=name+'_pwise2')
@@ -415,6 +415,11 @@ def data_augment(x, x_size, mask_matrix, warp_source, warp_dest):
 
 # -------------------------------- image utils --------------------------------
 # -------------------------------- other utils --------------------------------
+import time
+def get_current_time():
+    t = time.localtime(time.time())
+    local_time = str(t.tm_year)+'_'+str(t.tm_mon)+'_'+str(t.tm_mday)+'_'+str(t.tm_hour)
+    return local_time
 
 def count_conv_params_flops(conv_layer, verbose=1):
     # out shape is  n_cells_dim1 * (n_cells_dim2 * n_cells_dim3)
@@ -480,6 +485,7 @@ def count_mobilenet_v2_param(stage = [3,3,3,3], input_channel = [16,32,64,128], 
         input_channel.insert(0, 1)
     stage_len = len(stage)
     total_count = 0
+    feature_mixed_channel = 128
     # input conv
     total_count = total_count + kernel_size[0]*kernel_size[1]*input_channel[0]*input_channel[1]
     # block
@@ -501,8 +507,10 @@ def count_mobilenet_v2_param(stage = [3,3,3,3], input_channel = [16,32,64,128], 
             # point-wise
             total_count = total_count + 1*1*input_channel[s+1]*expension*input_channel[s+2]
     
+    # feature_mixed
+    total_count = total_count + 1*1*input_channel[-1]*feature_mixed_channel
     # fc 
-    total_count = total_count + input_channel[-1]*2
+    total_count = total_count + feature_mixed_channel*2
 
     return total_count
 

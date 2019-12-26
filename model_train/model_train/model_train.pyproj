@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>d14fc6e1-242f-4901-9cac-bc7483c67b6b</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>train.py</StartupFile>
+    <StartupFile>train_by_prepared_data.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -30,7 +30,16 @@
     <Compile Include="models.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="plot_thread.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="restore_data_batch.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="train.py" />
+    <Compile Include="train_by_prepared_data.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="utils.py">
       <SubType>Code</SubType>
     </Compile>

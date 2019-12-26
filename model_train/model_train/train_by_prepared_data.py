@@ -1,3 +1,4 @@
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -23,7 +24,7 @@ import platform
 from pathlib import Path
 import os
 from utils import data_augment, get_mask_par, get_warp_par, get_current_time
-
+import random
 import matplotlib.pyplot as p
 
 FLAGS = None
@@ -69,11 +70,11 @@ def main(_):
   sess = tf.compat.v1.InteractiveSession()
 
 
-  # get data generator
-  data_processor = input_data.DataProcessor(FLAGS.data_dir, FLAGS.batch_size, FLAGS.image_resolution, FLAGS.color_mode)
-  training_generator = data_processor.train_data_generator()
 
-  val_generator = data_processor.val_data_generator()
+  # get data generator
+  #data_processor = input_data.DataProcessor(FLAGS.data_dir, FLAGS.batch_size, FLAGS.image_resolution, FLAGS.color_mode)
+  #training_generator = data_processor.train_data_generator()
+  #val_generator = data_processor.val_data_generator()
 
   # step and learning rate
   training_steps_list = [FLAGS.step_per_epoch]*FLAGS.epoch
@@ -106,7 +107,7 @@ def main(_):
 
   # separate training stage and val stage for is_training
   selected_model = FLAGS.model_architecture
-  logits, softmax_prob, dropout_prob_ph= models.create_model(
+  logits, softmax_prob, dropout_prob_ph, model_detail= models.create_model(
       input_batch_ph,
       model_setting,
       selected_model)
@@ -169,6 +170,17 @@ def main(_):
                        g_model_selected + '.pbtxt')
 
   # -----------------------------------------------------------------------------------------------------
+  #################################################
+  # load check point
+  # 2019_12_23_13_085 : 85% ACC, 128*128 
+  #################################################
+  saver = tf.train.Saver()
+  sess.run(tf.global_variables_initializer())    
+  saver.restore(sess, r'E:\Visual Wake Words\script\model_train\model_train\models\resnet\2019_12_23_13_085\speech_commands_train\resnet.ckpt-64500')           
+
+  #################################################
+
+
   ####################################
   # restore model and training details
   ####################################
@@ -176,9 +188,9 @@ def main(_):
   with open(detail_path, 'w') as f:
       f.write('model: %s \n'%(g_model_selected))
       f.write('-----------------model setting-------------------' +'\n')
-      f.write('input_channel: '+model_detail['input_channel'] +'\n')
-      f.write('expension_factor: '+model_detail['expension_factor'] +'\n')
-      f.write('stage: '+model_detail['stage'] +'\n')
+      f.write('input_channel: '+str(model_detail['input_channel']) +'\n')
+      f.write('expension_factor: '+str(model_detail['expension_factor']) +'\n')
+      f.write('stage: '+str(model_detail['stage']) +'\n')
       f.write('-----------------training setting-------------------' +'\n')
       f.write('start_learning_rate: %f \n'%(FLAGS.start_learning_rate))
       f.write('learning_rate_decay: %f \n'%(FLAGS.learning_rate_decay))
@@ -189,6 +201,9 @@ def main(_):
       f.write('optimizor: %s \n'%(FLAGS.optimizor))
 
   ####################################
+
+
+
   print('Training started...')
   #starting time
   t0=time.time()
@@ -196,11 +211,11 @@ def main(_):
   # Training loop.
   training_steps_max = np.sum(training_steps_list)
 
-  #p.figure(1)
-  #p.ylim((0.3, 1))
-  plot_thr = plot_thread()
-  plot_thr.daemon = True
-  plot_thr.start()
+  is_plot_acc=False
+  if is_plot_acc:
+      plot_thr = plot_thread()
+      plot_thr.daemon = True
+      plot_thr.start()
   print('======================================..')
   for training_step in range(start_step, training_steps_max + 1):
     # Figure out what the current learning rate is.
@@ -212,7 +227,15 @@ def main(_):
         break
 
   # Pull training data and labels that we'll use for training.
-    data_batch, data_labels = next(training_generator)
+    #data_batch, data_labels = next(training_generator)
+    
+    training_data = sio.loadmat(os.path.join(FLAGS.data_dir,'train_resize','whole_data_batch_224',
+                                             'batch_%d.mat'%(training_step%FLAGS.step_per_epoch)))
+    data_batch, data_labels = training_data['data'], training_data['label'][0]
+
+    # change batch==64 to batch==FLAGS.batch_size(<64)
+    index = random.sample(range(64), FLAGS.batch_size)
+    data_batch, data_labels = data_batch[index],  data_labels[index]
 
     # Run the graph with this batch of training data.
     train_summary, train_accuracy, cross_entropy_value, _, _, logit_out = sess.run(
@@ -227,9 +250,9 @@ def main(_):
             dropout_prob_ph: FLAGS.dropout_prob
         })
     #####################
-    if training_step < 100000:
-        print('---------------------------logit----------------------')
-        print(logit_out[:5])
+    #if training_step < 100000:
+    #    print('---------------------------logit----------------------')
+    #    print(logit_out[:5])
     #print('---------------------------ground_truth----------------------')
     #print(data_labels)
     #####################
@@ -247,20 +270,12 @@ def main(_):
 
     #print(np.array(acc_list).shape, np.array(acc_list_moving_avg[1:]).shape)
 
-    if training_step%10 == 0:
-        #p.clf()
-        #p.plot(acc_list[0::10], 'b')
-        #p.plot(acc_list_moving_avg[1::10], 'r-')
-        #p.ylim((0.3, 1))
-        ##ax2.plot(loss_list, 'r')
-        #p.pause(0.001)
+    if training_step%20 == 0 and is_plot_acc==True:
         plot_thr.set_param(acc_list, acc_list_moving_avg)
 
 
     # ---------validation-----------
-    #print('-'*50)
-    #print(training_step % FLAGS.eval_step_interval, is_last_step)
-    #print('-'*50)
+
 
     if (training_step % FLAGS.eval_step_interval) == 0 or is_last_step:
       print('start validation...')
@@ -269,21 +284,27 @@ def main(_):
 
       #####################
       # test on small set
-      val_data_size = 64*20
+      #val_data_size = 64*20
       #####################
 
-      val_total_step = val_data_size//FLAGS.batch_size
+      #val_total_step = val_data_size//FLAGS.batch_size
+      val_total_step = 300
 
       for i in range(0, val_total_step):
         # pull validation data and labels
-        val_data_batch, va_data_labels = next(val_generator)
+        #val_data_batch, val_data_labels = next(val_generator)
+        val_data = sio.loadmat(os.path.join(FLAGS.data_dir,'val_resize','whole_data_batch_224',
+                                                 'batch_%d.mat'%(training_step%200)))
+        val_data_batch, val_data_labels = val_data['data'], val_data['label'][0]
+        # change batch==64 to batch==FLAGS.batch_size(<64)
+        val_data_batch, val_data_labels = val_data_batch[index], val_data_labels[index]
         # Run a validation step and capture training summaries for TensorBoard
         # with the `merged` op.
         validation_summary, validation_accuracy, validation_cross_entropy_value = sess.run(
             [merged_summaries, evaluation_step, cross_entropy_mean],
             feed_dict={
                 input_batch_ph: val_data_batch,
-                input_ground_truth_ph: va_data_labels,
+                input_ground_truth_ph: val_data_labels,
                 dropout_prob_ph: 0.0
             })
 
@@ -327,8 +348,8 @@ def main(_):
 
   mylogfile_ID.close()
   print('My log file generated.')
-
-  plot_thr.end_thread()
+  if is_plot_acc:
+    plot_thr.end_thread()
   if FLAG_linux==0:
       my_log = {'loss': loss_list, 'val_loss': val_loss_list, 
             'acc': acc_list, 'val_acc': val_acc_list}
@@ -349,9 +370,9 @@ if __name__ == '__main__':
 
 
 
-  #g_model_selected='resnet'
+  g_model_selected='resnet'
   #g_model_selected='mobile_net_v2'
-  g_model_selected='devol_convnet'
+  #g_model_selected='devol_convnet'
 
   training_set_len = len(os.listdir(r'E:\Visual Wake Words\data\coco_dataset\train2014'))
 
@@ -393,7 +414,7 @@ if __name__ == '__main__':
       '--train_dir',
       type=str,
       default=g_model_path+'speech_commands_train',
-      help='Directory to write event l  ogs and checkpoint.')
+      help='Directory to write event logs and checkpoint.')
 
   parser.add_argument(
       '--save_step_interval',
@@ -431,7 +452,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--image_resolution',
       type=str,
-      default='128 128',
+      default='224 224',
       help='240p(240 320), 360p(360 480) or other size.')
 
   parser.add_argument(
@@ -449,7 +470,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--dropout_prob',
       type=float,
-      default=0.3,
+      default=0.05,
       help='0~1')
 
   parser.add_argument(
@@ -461,19 +482,19 @@ if __name__ == '__main__':
   parser.add_argument(
       '--batch_size',
       type=int,
-      default=64,
+      default=32,
       help='How many items to train with at once',)
 
   parser.add_argument(
       '--epoch',
       type=int,
-      default=50,
+      default=3,
       help='How many training epochs to run',)
 
   parser.add_argument(
       '--step_per_epoch',
       type=int,
-      #default=300,
+      #default=500,
       default=1290,
       help='How many training step per epoch',)
 
@@ -483,13 +504,13 @@ if __name__ == '__main__':
   parser.add_argument(
       '--start_learning_rate',
       type=float,
-      default=0.001,
+      default=0.0005,
       #default=0.045,
       help='learning_rate will decay by epoch',)
   parser.add_argument(
       '--learning_rate_decay',
       type=float,
-      default=0.9,
+      default=0.95,
       help='learning_rate decay',)
   #####################
   # optimizor setting #
