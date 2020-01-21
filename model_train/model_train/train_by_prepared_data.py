@@ -23,7 +23,7 @@ import datetime
 import platform
 from pathlib import Path
 import os
-from utils import data_augment, get_mask_par, get_warp_par, get_current_time
+from utils import data_augment, get_mask_par, get_warp_par, get_current_time, spase_to_onehot
 import random
 import matplotlib.pyplot as p
 
@@ -63,7 +63,7 @@ def main(_):
   val_file_list = os.listdir(load_path_val)
   val_data_size = len(val_file_list)
 
-  # We want to see all the logging messages for this tutorial.
+  # We want to see all the logging messages .
   tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
 
   # Start a new TensorFlow session.
@@ -115,7 +115,7 @@ def main(_):
   # Define loss and optimizer
   input_ground_truth_ph = tf.compat.v1.placeholder(
        #tf.int64, [FLAGS.batch_size,], name='groundtruth_input') #google version on github 08.2019
-       tf.int64, [None,], name='input_groundtruth')
+       tf.int64, [None], name='input_groundtruth')
 
   # Optionally we can add runtime checks to spot when NaNs or other symptoms of
   # numerical errors start occurring during training.
@@ -125,6 +125,9 @@ def main(_):
   with tf.name_scope('cross_entropy'):
     cross_entropy_mean = tf.compat.v1.losses.sparse_softmax_cross_entropy(
         labels=input_ground_truth_ph, logits=logits)
+    #cross_entropy_mean = tf.compat.v1.losses.softmax_cross_entropy(
+    #                    onehot_labels=input_ground_truth_ph, logits=logits, 
+    #                    label_smoothing=FLAGS.label_smooth)
 
   tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
@@ -137,10 +140,14 @@ def main(_):
     elif FLAGS.optimizor == 'RMSprop':
         train_step = tf.train.RMSPropOptimizer(
             learning_rate=input_learning_rate_ph, momentum=FLAGS.momentum).minimize(cross_entropy_mean)
+    elif FLAGS.optimizor == 'sgd':
+        train_step = tf.compat.v1.train.MomentumOptimizer(
+            learning_rate=input_learning_rate_ph, momentum=FLAGS.momentum).minimize(cross_entropy_mean)
     else:
         raise Exception("plz set optimizor!")
 
   predicted_indices = tf.argmax(logits, 1)
+  #input_ground_truth = tf.argmax(input_ground_truth_ph, 1)
   correct_prediction = tf.equal(predicted_indices, input_ground_truth_ph)
 
   #confusion_matrix = tf.math.confusion_matrix(labels=input_ground_truth_ph, 
@@ -174,9 +181,9 @@ def main(_):
   # load check point
   # 2019_12_23_13_085 : 85% ACC, 128*128 
   #################################################
-  saver = tf.train.Saver()
-  sess.run(tf.global_variables_initializer())    
-  saver.restore(sess, r'E:\Visual Wake Words\script\model_train\model_train\models\resnet\2019_12_23_13_085\speech_commands_train\resnet.ckpt-64500')           
+  #saver = tf.train.Saver()
+  #sess.run(tf.global_variables_initializer())    
+  #saver.restore(sess, r'E:\Visual Wake Words\script\model_train\model_train\models\resnet\2019_12_23_13_085\speech_commands_train\resnet.ckpt-64500')           
 
   #################################################
 
@@ -201,7 +208,9 @@ def main(_):
       f.write('optimizor: %s \n'%(FLAGS.optimizor))
 
   ####################################
-
+  from utils import moving_average
+  avg_train_loss = moving_average(init_avg=0.7)
+  avg_train_acc = moving_average(init_avg=0.5)
 
 
   print('Training started...')
@@ -232,11 +241,11 @@ def main(_):
     training_data = sio.loadmat(os.path.join(FLAGS.data_dir,'train_resize','whole_data_batch_224',
                                              'batch_%d.mat'%(training_step%FLAGS.step_per_epoch)))
     data_batch, data_labels = training_data['data'], training_data['label'][0]
-
+    
     # change batch==64 to batch==FLAGS.batch_size(<64)
     index = random.sample(range(64), FLAGS.batch_size)
     data_batch, data_labels = data_batch[index],  data_labels[index]
-
+    #data_labels = spase_to_onehot(data_labels, 2)
     # Run the graph with this batch of training data.
     train_summary, train_accuracy, cross_entropy_value, _, _, logit_out = sess.run(
         [
@@ -258,9 +267,13 @@ def main(_):
     #####################
 
     train_writer.add_summary(train_summary, training_step)
-    tf.compat.v1.logging.info('Step #%d: rate %f, accuracy %.1f%%, cross entropy %f' %
-                    (training_step, learning_rate_value, train_accuracy * 100,
-                     cross_entropy_value))
+    avg_train_acc.update(train_accuracy)
+    avg_train_loss.update(cross_entropy_value)
+
+    if training_step%10==0:
+        tf.compat.v1.logging.info('Step #%d: rate %f, accuracy %.2f%%(%.2f%%), cross entropy %.2f(%.2f)' %
+                        (training_step, learning_rate_value, train_accuracy * 100, avg_train_acc.accumulate*100,
+                         cross_entropy_value, avg_train_loss.accumulate))
     is_last_step = (training_step == training_steps_max)
 
     acc_list.append(train_accuracy)
@@ -298,6 +311,9 @@ def main(_):
         val_data_batch, val_data_labels = val_data['data'], val_data['label'][0]
         # change batch==64 to batch==FLAGS.batch_size(<64)
         val_data_batch, val_data_labels = val_data_batch[index], val_data_labels[index]
+
+        #val_data_labels = spase_to_onehot(val_data_labels, 2)
+
         # Run a validation step and capture training summaries for TensorBoard
         # with the `merged` op.
         validation_summary, validation_accuracy, validation_cross_entropy_value = sess.run(
@@ -321,8 +337,13 @@ def main(_):
       val_loss_list.append(total_loss)
 
 
-      tf.compat.v1.logging.info('Step %d: Validation accuracy = %.1f%% (N=%d)' %
-                      (training_step, total_accuracy * 100, val_data_size))
+      tf.compat.v1.logging.info('Step %d: Validation accuracy = %.2f%% (N=%d)' %
+                      (training_step, total_accuracy * 100, val_total_step))
+
+      if FLAG_linux==0:
+          my_log = {'loss': loss_list, 'val_loss': val_loss_list, 
+                'acc': acc_list, 'val_acc': val_acc_list}
+          sio.savemat('.\\models\\'+g_model_selected+'\\'+date_str+'\\'+'my_log.mat', my_log)
 
     # Save the model checkpoint periodically.
     if (training_step % FLAGS.save_step_interval == 0 or
@@ -331,10 +352,7 @@ def main(_):
                                      g_model_selected + '.ckpt')
       tf.compat.v1.logging.info('Saving to "%s-%d"', checkpoint_path, training_step)
       saver.save(sess, checkpoint_path, global_step=training_step)
-    if FLAG_linux==0:
-      my_log = {'loss': loss_list, 'val_loss': val_loss_list, 
-            'acc': acc_list, 'val_acc': val_acc_list}
-      sio.savemat('.\\models\\'+g_model_selected+'\\'+date_str+'\\'+'my_log.mat', my_log)
+
 
   t1=time.time()
   t_train=(t1-t0)/60.0
@@ -344,8 +362,6 @@ def main(_):
   mylogfile_ID.write('model used:'+g_model_selected+'\n')
   mylogfile_ID.write('Training started in:'+date_str+'\n')
   mylogfile_ID.write('Training time is: %.2f minutes\n' % t_train)
-
-
   mylogfile_ID.close()
   print('My log file generated.')
   if is_plot_acc:
@@ -425,7 +441,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--eval_step_interval',
       type=int,
-      default = 500,
+      default = 1000,
       help='How often to evaluate the training results.')
 
   #####################
@@ -470,7 +486,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--dropout_prob',
       type=float,
-      default=0.05,
+      default=0.2,
       help='0~1')
 
   parser.add_argument(
@@ -482,13 +498,13 @@ if __name__ == '__main__':
   parser.add_argument(
       '--batch_size',
       type=int,
-      default=32,
+      default=64,
       help='How many items to train with at once',)
 
   parser.add_argument(
       '--epoch',
       type=int,
-      default=3,
+      default=35,
       help='How many training epochs to run',)
 
   parser.add_argument(
@@ -499,18 +515,18 @@ if __name__ == '__main__':
       help='How many training step per epoch',)
 
   #########################
-  # learning rate setting #
+  # learning rate setting # 
   #########################
   parser.add_argument(
       '--start_learning_rate',
       type=float,
-      default=0.0005,
+      default=0.001,
       #default=0.045,
       help='learning_rate will decay by epoch',)
   parser.add_argument(
       '--learning_rate_decay',
       type=float,
-      default=0.95,
+      default=0.94,
       help='learning_rate decay',)
   #####################
   # optimizor setting #
@@ -519,13 +535,17 @@ if __name__ == '__main__':
       '--optimizor',
       type=str,
       default='Adam',
-      help='Adam, RMSprop',)
+      help='Adam, RMSprop, sgd',)
   parser.add_argument(
       '--momentum',
       type=float,
       default=0.9,
       help='optimizor momentum',)
-
+  parser.add_argument(
+      '--label_smooth',
+      type=float,
+      default=0.1,
+      help='',)
 
 
 

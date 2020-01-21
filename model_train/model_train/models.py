@@ -5,7 +5,7 @@ from __future__ import print_function
 import math
 
 import tensorflow as tf
-from utils import conv_block, mobilenetv2_block_1, mobilenetv2_block_2, data_augment, group_conv_block, conv_layer, fc_layer, identity_block_v2,identity_block_v1, dropout_selu, conv_block, activation, dropout_with_mode
+from utils import batch_norm,conv_block_v1,conv_block_v2, mobilenetv2_block_1, mobilenetv2_block_2, data_augment, group_conv_block, conv_layer, fc_layer, identity_block_v2,identity_block_v1, dropout_selu, activation, dropout_with_mode
 
 
 def create_model(input_batch, model_setting, model_architecture):
@@ -14,7 +14,6 @@ def create_model(input_batch, model_setting, model_architecture):
         return resnet(input_batch, model_setting, dropout_prob_ph)
     if model_architecture == 'mobile_net_v2':
         dropout_prob_ph = tf.compat.v1.placeholder(tf.float32, name='dropout_prob')
-        #is_training_ph = tf.compat.v1.placeholder(tf.bool, name='is_training')
 
         return mobile_net_v2(input_batch, model_setting, dropout_prob_ph)
     if model_architecture == 'devol_convnet':
@@ -41,51 +40,58 @@ def resnet(input_batch, model_setting, dropout_prob_ph):
     input_height = image_resolution[0]
     input_width = image_resolution[1]
 
-    input_channel = [32,32,32,32,32]
-
-    stage =[1,1,1,1,1] # each stage includes N block
-
+    input_channel = [16,32,64,128,256]
+    kernel = 5
+    stage = [0,0,0,0] # each stage includes N block
+    mix_feature_channel = 512
+    
     if model_setting['color_mode'] == 'rgb':
         input_channel.insert(0,3)
     elif model_setting['color_mode'] == 'gray':
         input_channel.insert(0,1)
-
-        
+   
     # 2.0
     c0 = conv_layer(input_batch, 
-                    [3, 3, input_channel[0], input_channel[1]],
-                    [1,1,1,1],
+                    [kernel, kernel, input_channel[0], input_channel[1]],
+                    [1,2,2,1],
                     mode=init_mode,
-                    name='input_layer_c0')
-    c0 = tf.layers.BatchNormalization(momentum=0.99,scale=True,trainable=False)(c0)
+                    name='inp_c')
+    c0 = batch_norm(c0,momentum=0.99,scale=True,trainable=True,name='inp_bn')
     c0 = activation(c0, activation_mode)
-    c0=dropout_with_mode(c0, dropout_prob_ph, activation_mode)
+    c0 = dropout_with_mode(c0, dropout_prob_ph, activation_mode)
     di = c0
 
     # 2.1 residual
     for s in range(1, len(stage)+1):
-        print(di.shape, s, input_channel[s])
-        print('-----------------------------')
+        di = conv_block_v2(di, [kernel,kernel,input_channel[s],input_channel[s+1]], [1,2,2,1], 
+                            is_training = True,
+                            init_mode=init_mode, 
+                            activation_mode=activation_mode,
+                            name='stage%d_conv_block'%(s))
+        di=dropout_with_mode(di, dropout_prob_ph, activation_mode)
+        
         for i in range(1, stage[s-1]+1):
-            bi = identity_block_v1(di, [3,3,input_channel[s],input_channel[s]],[1,1,1,1],
-                                   is_training = False,
+            di = identity_block_v1(di, [kernel,kernel,input_channel[s+1],input_channel[s+1]],[1,1,1,1],
+                                   is_training = True,
                                    init_mode=init_mode, 
                                    activation_mode=activation_mode, 
-                                   name='stage%d_block1%d'%(s,i))
-            di=dropout_with_mode(bi, dropout_prob_ph, activation_mode)
-            #di = bi
-        
-        if s < len(stage):
-            print(di.shape, s, input_channel[s], input_channel[s+1])
-            di = conv_block(di, [3,3,input_channel[s],input_channel[s+1]], [1,2,2,1], 
-                            is_training = False,
-                            init_mode=init_mode, 
-                            activation_mode=activation_mode)
+                                   name='stage%d_id_block%d'%(s,i))
             di=dropout_with_mode(di, dropout_prob_ph, activation_mode)
 
+    # 2.2 mix feature
+    mix_feature = conv_layer(di, 
+                    [1, 1, input_channel[-1], mix_feature_channel],
+                    [1,1,1,1],
+                    mode=init_mode,
+                    name='mix_feature')
+    mix_feature = batch_norm(mix_feature,momentum=0.99,scale=True,trainable=True,name='mix_feature_bn')
+    mix_feature = activation(mix_feature, activation_mode)
+    
     # 3. global avg_pool
-    avg_pool = tf.keras.layers.GlobalAveragePooling2D()(di)
-    logits = fc_layer(avg_pool, input_channel[-1], 2, mode=init_mode, name = 'output_fc')
+    avg_pool = tf.keras.layers.GlobalAveragePooling2D()(mix_feature)
+    avg_pool = dropout_with_mode(avg_pool, dropout_prob_ph, activation_mode)
+    
+    logits = fc_layer(avg_pool, mix_feature_channel, 2, mode=init_mode, name = 'output_fc')
     
     # 3.x 
     #flatten = tf.keras.layers.Flatten()(di)
@@ -115,10 +121,10 @@ def mobile_net_v2(input_batch, model_setting, dropout_prob_ph):
     image_resolution = [int(i) for i in image_resolution_str]
     input_height = image_resolution[0]
     input_width = image_resolution[1]
-    input_channel = [8,32,32,64,64]
-    expension_factor = [6,6,6,6,6]
-    stage = [1,1,1,1,1] # each stage includes N block
-    feature_mixed_channel = 128
+    input_channel = [16,32,64,128,256]
+    expension_factor = [3,3,3,3]
+    stage = [0,0,0,0] # each stage includes N block
+    feature_mixed_channel = 256
 
 
     if model_setting['color_mode'] == 'rgb':
@@ -129,7 +135,7 @@ def mobile_net_v2(input_batch, model_setting, dropout_prob_ph):
     # 2.0
     c0 = conv_layer(input_batch, 
                     [3, 3, input_channel[0], input_channel[1]],
-                    [1,1,1,1],
+                    [1,2,2,1],
                     mode=init_mode,
                     padding='SAME',
                     name='input_layer_c0')
@@ -139,22 +145,22 @@ def mobile_net_v2(input_batch, model_setting, dropout_prob_ph):
     #di=dropout_with_mode(c0, dropout_prob_ph, activation_mode)
     di=c0
 
-    # 2.1 residual
+    # 2 blocks
     for s in range(1, len(stage)+1):
-        for i in range(1, stage[s-1]+1):
-            bi = mobilenetv2_block_1(di, [5,5,input_channel[s],input_channel[s]],
-                                    expension_factor=expension_factor[s-1],
-                                    is_training = True,
-                                    name='stage%d_block1_%d'%(s,i))
-
-            di = dropout_with_mode(bi,dropout_prob_ph, activation_mode)
-            #di = bi
-
-        if s < len(stage):
-            di = mobilenetv2_block_2(di, [5,5,input_channel[s],input_channel[s+1]],
+        # None
+        di = mobilenetv2_block_2(di, [5,5,input_channel[s],input_channel[s+1]],
                                      expension_factor=expension_factor[s-1],
                                      is_training = True,
-                                     name='stage%d_block2'%(s))
+                                     name='stage%d_block'%(s))
+        #di = dropout_with_mode(di,dropout_prob_ph, activation_mode)
+        for i in range(1, stage[s-1]+1):
+            bi = mobilenetv2_block_1(di, [5,5,input_channel[s+1],input_channel[s+1]],
+                                    expension_factor=expension_factor[s-1],
+                                    is_training = True,
+                                    name='stage%d_block_identity_%d'%(s,i))
+
+            #di = dropout_with_mode(bi,dropout_prob_ph, activation_mode)
+            di = bi
 
     # 3. feature-mixed conv. + global avg_pool
     feature_mixed = conv_layer(di, 
@@ -166,11 +172,11 @@ def mobile_net_v2(input_batch, model_setting, dropout_prob_ph):
     feature_mixed = tf.layers.BatchNormalization(momentum=0.99,scale=True, 
                                       trainable=True)(feature_mixed)
     feature_mixed = activation(feature_mixed, activation_mode)
-    feature_mixed = dropout_with_mode(feature_mixed, dropout_prob_ph, activation_mode)
+    
     avg_pool = tf.keras.layers.GlobalAveragePooling2D()(feature_mixed)
-
+    avg_pool = dropout_with_mode(avg_pool, dropout_prob_ph, activation_mode)
     # 4. fc
-    logits = fc_layer(avg_pool, input_channel[-1], 2, mode=init_mode, name = 'output_fc')
+    logits = fc_layer(avg_pool, feature_mixed_channel, 2, mode=init_mode, name = 'output_fc')
     softmax_prob = tf.keras.activations.softmax(logits)
     #logits = tf.reshape(logits, [-1,])
     return logits, softmax_prob, dropout_prob_ph, {'input_channel': input_channel, 'expension_factor':expension_factor, 'stage':stage}

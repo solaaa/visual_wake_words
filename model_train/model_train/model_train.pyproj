@@ -36,6 +36,9 @@
     <Compile Include="restore_data_batch.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="restore_mobilenet_weights.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="train.py" />
     <Compile Include="train_by_prepared_data.py">
       <SubType>Code</SubType>
