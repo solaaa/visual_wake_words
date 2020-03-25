@@ -95,10 +95,12 @@ def main(_):
   # ph = placeholder
   image_resolution_str = model_setting['image_resolution'].split(' ')
   image_resolution = [int(i) for i in image_resolution_str]
-  image_height, image_width = image_resolution[0], image_resolution[1]
+  image_height, image_width = image_resolution[0]//8, image_resolution[1]//8 # //8 is to use freq-domain data
 
   if FLAGS.color_mode == 'gray':
       image_channel = 1
+  elif FLAGS.color_mode == 'ycbcr':
+      image_channel = 41
   else:
       image_channel = 3
   input_batch_ph = tf.compat.v1.placeholder(
@@ -238,7 +240,7 @@ def main(_):
   # Pull training data and labels that we'll use for training.
     #data_batch, data_labels = next(training_generator)
     
-    training_data = sio.loadmat(os.path.join(FLAGS.data_dir,'train_resize','whole_data_batch_224',
+    training_data = sio.loadmat(os.path.join(FLAGS.data_dir,'train_resize','freq_data_224',
                                              'batch_%d.mat'%(training_step%FLAGS.step_per_epoch)))
     data_batch, data_labels = training_data['data'], training_data['label'][0]
     
@@ -306,8 +308,8 @@ def main(_):
       for i in range(0, val_total_step):
         # pull validation data and labels
         #val_data_batch, val_data_labels = next(val_generator)
-        val_data = sio.loadmat(os.path.join(FLAGS.data_dir,'val_resize','whole_data_batch_224',
-                                                 'batch_%d.mat'%(training_step%200)))
+        val_data = sio.loadmat(os.path.join(FLAGS.data_dir,'val_resize','freq_data_224',
+                                                 'batch_%d.mat'%(i%val_total_step)))
         val_data_batch, val_data_labels = val_data['data'], val_data['label'][0]
         # change batch==64 to batch==FLAGS.batch_size(<64)
         val_data_batch, val_data_labels = val_data_batch[index], val_data_labels[index]
@@ -386,7 +388,8 @@ if __name__ == '__main__':
 
 
 
-  g_model_selected='resnet'
+  #g_model_selected='resnet'
+  g_model_selected='freq_net'
   #g_model_selected='mobile_net_v2'
   #g_model_selected='devol_convnet'
 
@@ -458,8 +461,8 @@ if __name__ == '__main__':
   parser.add_argument(
       '--color_mode',
       type=str,
-      default='rgb',
-      help='rgb, gray')
+      default='ycbcr',
+      help='rgb, gray, ycbcr')
 
   ####################
   # training settint #
@@ -504,7 +507,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--epoch',
       type=int,
-      default=35,
+      default=50,
       help='How many training epochs to run',)
 
   parser.add_argument(
@@ -526,7 +529,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--learning_rate_decay',
       type=float,
-      default=0.94,
+      default=0.95,
       help='learning_rate decay',)
   #####################
   # optimizor setting #

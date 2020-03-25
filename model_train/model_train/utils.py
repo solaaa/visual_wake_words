@@ -291,7 +291,7 @@ def conv_block_v1(x, kernel_size, stride, is_training, init_mode='selu', activat
     # direct shortcut
     d = conv_layer(inp, kernel_size, 
                    [1,2,2,1], padding='SAME', mode=init_mode, name=name+'_c3')
-    
+    d = batch_norm(d, momentum=0.99,scale=True,trainable=is_training, name=name+'_bn2')
 
     out = tf.add(d, x)
     out = activation(out, activation_mode)
