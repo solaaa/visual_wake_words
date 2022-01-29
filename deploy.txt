@@ -38,7 +38,7 @@ v2ray --config=/usr/local/etc/v2ray/config.json
 
 
 CLIENT
-5. download  V2rayN and V2ray-core in PC (plz google, very easy)
+5. download  V2rayN and V2ray-core in PC 
 
 
 
