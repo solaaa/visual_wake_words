@@ -1,0 +1,44 @@
+SERVER
+1. deploy instance
+
+2. bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh)
+
+3. config file
+input as follows:
+
+vim /usr/local/etc/v2ray/config.json
+[i]
+{
+    "inbounds": [
+        {
+            "port": 10086
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "b831381d-6324-4d53-ad4f-8cda48b30811"
+                    }
+                ]
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "freedom"
+        }
+    ]
+}
+[ESC]
+:wq  
+[enter]
+
+4. open 
+
+v2ray --config=/usr/local/etc/v2ray/config.json
+
+
+CLIENT
+5. download  V2rayN and V2ray-core in PC (plz google, very easy)
+
+
+
