@@ -34,6 +34,13 @@ vim /usr/local/etc/v2ray/config.json
 
 4. open 
 
+sudo systemctl enable v2ray
+sudo systemctl disable v2ray
+sudo systemctl start v2ray
+sudo systemctl stop v2ray
+sudo systemctl restart v2ray
+sudo systemctl status v2ray
+
 v2ray --config=/usr/local/etc/v2ray/config.json
 
 
