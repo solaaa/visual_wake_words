@@ -11,7 +11,7 @@ vim /usr/local/etc/v2ray/config.json
 {
     "inbounds": [
         {
-            "port": 10086
+            "port": 10086,
             "protocol": "vmess",
             "settings": {
                 "clients": [
